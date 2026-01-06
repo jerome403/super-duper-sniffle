@@ -1,0 +1,86 @@
+{
+  "condition": "tinnitus",
+  "diagnosticCodes": ["6260"],
+  "maxRating": 10,
+  "commonDenialReasons": [
+    {
+      "reason": "No evidence of acoustic trauma in service",
+      "frequency": 0.35,
+      "counterStrategy": "Obtain buddy statements, document MOS noise exposure",
+      "bestPathway": "SUPPLEMENTAL",
+      "caselaw": ["Hensley v. Brown", "Ledford v. Derwinski"]
+    },
+    {
+      "reason": "No nexus between current tinnitus and service",
+      "frequency": 0.40,
+      "counterStrategy": "Obtain IMO addressing delayed onset, in-service noise exposure",
+      "bestPathway": "SUPPLEMENTAL",
+      "caselaw": []
+    },
+    {
+      "reason": "C&P examiner provided negative opinion",
+      "frequency": 0.20,
+      "counterStrategy": "Challenge examiner rationale, note Colvin if VA added own conclusions",
+      "bestPathway": "HLR",
+      "caselaw": ["Colvin v. Derwinski", "Nieves-Rodriguez v. Peake"]
+    }
+  ],
+  "keyFactors": {
+    "military_noise_exposure": {
+      "description": "Documented noise exposure during military service",
+      "importance": "critical",
+      "evidence_types": ["MOS documentation", "buddy statements", "hearing conservation records"]
+    },
+    "onset_timing": {
+      "description": "When symptoms began relative to service",
+      "importance": "high",
+      "favorable": "During service or shortly after",
+      "unfavorable": "Many years after service with intervening noise exposure"
+    },
+    "continuity": {
+      "description": "Continuous symptoms since service",
+      "importance": "high",
+      "evidence_types": ["lay statements", "medical records showing complaints"]
+    }
+  },
+  "successPatterns": [
+    {
+      "pattern": "Combat MOS with buddy statement and IMO",
+      "successRate": 0.85,
+      "description": "Veterans with combat or high-noise MOS who obtain supporting statements"
+    },
+    {
+      "pattern": "Hearing loss already service-connected",
+      "successRate": 0.90,
+      "description": "When hearing loss is already SC, tinnitus often follows as secondary"
+    }
+  ],
+  "failurePatterns": [
+    {
+      "pattern": "Long gap with post-service noise exposure",
+      "failureRate": 0.70,
+      "description": "Decades between service and diagnosis with civilian noise jobs",
+      "mitigation": "Obtain IMO addressing why military exposure is more likely cause"
+    }
+  ],
+  "bvaDecisionPatterns": {
+    "granted": {
+      "commonFactors": [
+        "Competent lay testimony of onset and continuity",
+        "MOS consistent with acoustic trauma",
+        "No contrary medical evidence"
+      ],
+      "averageRating": 10
+    },
+    "denied": {
+      "commonFactors": [
+        "Negative C&P exam with rationale",
+        "Long gap without documented complaints",
+        "Post-service noise exposure"
+      ]
+    }
+  },
+  "relatedConditions": ["hearing loss", "meniere's disease", "acoustic neuroma"],
+  "secondaryTo": [],
+  "canCauseSecondary": ["anxiety", "depression", "sleep disturbance", "headaches"]
+}

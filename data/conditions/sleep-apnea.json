@@ -1,0 +1,102 @@
+{
+  "condition": "sleep_apnea",
+  "diagnosticCodes": ["6847"],
+  "ratingCriteria": {
+    "0": "Asymptomatic but with documented sleep disorder breathing",
+    "30": "Persistent daytime hypersomnolence",
+    "50": "Requires use of breathing assistance device such as CPAP",
+    "100": "Chronic respiratory failure with carbon dioxide retention, cor pulmonale, or requires tracheostomy"
+  },
+  "commonDenialReasons": [
+    {
+      "reason": "No diagnosis during active duty service",
+      "frequency": 0.45,
+      "counterStrategy": "Establish nexus through weight gain, respiratory conditions, or PTSD connection",
+      "bestPathway": "SUPPLEMENTAL",
+      "caselaw": []
+    },
+    {
+      "reason": "No nexus opinion linking to service or service-connected condition",
+      "frequency": 0.35,
+      "counterStrategy": "Obtain IMO addressing secondary connection or aggravation",
+      "bestPathway": "SUPPLEMENTAL",
+      "caselaw": ["Allen v. Brown"]
+    },
+    {
+      "reason": "Weight gain after service attributed to natural causes",
+      "frequency": 0.15,
+      "counterStrategy": "Document medication side effects, limited mobility from SC conditions",
+      "bestPathway": "SUPPLEMENTAL",
+      "caselaw": []
+    }
+  ],
+  "keyFactors": {
+    "in_service_symptoms": {
+      "description": "Evidence of snoring, fatigue, or breathing issues during service",
+      "importance": "high",
+      "evidence_types": ["buddy statements from roommates/spouses", "service treatment records"]
+    },
+    "secondary_connection": {
+      "description": "Connection to already service-connected condition",
+      "importance": "critical",
+      "common_primaries": ["PTSD", "sinusitis", "rhinitis", "deviated septum", "obesity from SC conditions"],
+      "evidence_types": ["IMO establishing causal chain", "medical literature"]
+    },
+    "weight_history": {
+      "description": "Weight changes and their relationship to service/SC conditions",
+      "importance": "high",
+      "evidence_types": ["medical records showing weight progression", "medication records"]
+    }
+  },
+  "successPatterns": [
+    {
+      "pattern": "Secondary to PTSD with supporting IMO",
+      "successRate": 0.70,
+      "description": "Sleep apnea claimed secondary to PTSD with medical opinion discussing sleep architecture disruption"
+    },
+    {
+      "pattern": "Secondary to sinusitis/rhinitis with anatomical evidence",
+      "successRate": 0.75,
+      "description": "When nasal/sinus conditions already SC and contribute to airway obstruction"
+    },
+    {
+      "pattern": "Buddy statements documenting in-service snoring",
+      "successRate": 0.60,
+      "description": "Compelling lay evidence from service roommates/spouses about observed symptoms"
+    }
+  ],
+  "failurePatterns": [
+    {
+      "pattern": "Direct claim without in-service evidence",
+      "failureRate": 0.80,
+      "description": "Direct service connection claims rarely succeed without STR documentation",
+      "mitigation": "Reframe as secondary claim to established SC condition"
+    },
+    {
+      "pattern": "Weight-based argument without SC condition link",
+      "failureRate": 0.75,
+      "description": "Claiming weight gain caused sleep apnea without connecting weight gain to service",
+      "mitigation": "Document how SC conditions limit physical activity or cause weight gain"
+    }
+  ],
+  "bvaDecisionPatterns": {
+    "granted": {
+      "commonFactors": [
+        "Positive IMO with detailed rationale",
+        "Clear connection to service-connected condition",
+        "Buddy statements corroborating in-service symptoms"
+      ],
+      "averageRating": 50
+    },
+    "denied": {
+      "commonFactors": [
+        "Absence of in-service symptoms",
+        "Significant post-service weight gain without connection to service",
+        "Lack of medical nexus opinion"
+      ]
+    }
+  },
+  "relatedConditions": ["PTSD", "sinusitis", "rhinitis", "deviated septum", "obesity"],
+  "secondaryTo": ["PTSD", "sinusitis", "rhinitis", "cervical spine", "TBI"],
+  "canCauseSecondary": ["hypertension", "heart disease", "depression", "cognitive impairment", "erectile dysfunction"]
+}

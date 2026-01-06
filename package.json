@@ -1,0 +1,37 @@
+{
+  "name": "va-claims-expert",
+  "version": "1.0.0",
+  "description": "VA Claims Expert System - Analyzes veteran disability claims and recommends optimal appeal pathways",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "va-claims": "./bin/cli.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "cli": "node bin/cli.js",
+    "test": "node --test test/**/*.test.js",
+    "analyze": "node bin/cli.js analyze",
+    "fetch-bva": "node bin/cli.js fetch-bva"
+  },
+  "keywords": [
+    "veterans",
+    "va-claims",
+    "disability",
+    "appeals",
+    "ama",
+    "bva"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "inquirer": "^9.2.12",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
