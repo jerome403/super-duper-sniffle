@@ -153,7 +153,7 @@ export class PathwayRecommender {
     const recommendation = new ComprehensiveRecommendation();
 
     // Step 1: Rule-based evaluation
-    const ruleEvaluation = this.ruleEvaluator.evaluate(caseData.facts);
+    const ruleEvaluation = this.ruleEvaluator.evaluate(caseData.facts || {});
     recommendation.ruleBasedAnalysis = ruleEvaluation;
 
     // Step 2: Apply strategic factors

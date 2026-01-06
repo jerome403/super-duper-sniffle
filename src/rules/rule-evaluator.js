@@ -415,9 +415,10 @@ export class RuleEvaluator {
    * Check appeal deadlines
    */
   checkDeadlines(facts) {
-    if (!facts.decisionDate) {
+    if (!facts || !facts.decisionDate) {
       return {
-        warning: 'Decision date not provided - cannot calculate deadlines'
+        warning: 'Decision date not provided - cannot calculate deadlines',
+        pathwayDeadlines: null
       };
     }
 

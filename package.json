@@ -1,6 +1,6 @@
 {
   "name": "va-claims-expert",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "VA Claims Expert System - Analyzes veteran disability claims and recommends optimal appeal pathways",
   "main": "src/index.js",
   "type": "module",

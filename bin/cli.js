@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * VA Claims Expert System CLI
+ * VA Claims Decision-Support System CLI
  *
  * Command-line interface for analyzing veteran disability claims
  * and recommending optimal appeal pathways.
+ *
+ * Phase 1: Legal Foundation with Decision-Support
  */
 
 import { program } from 'commander';
@@ -13,28 +15,41 @@ import chalk from 'chalk';
 import { PathwayRecommender } from '../src/recommendation/pathway-recommender.js';
 import { RuleEvaluator } from '../src/rules/rule-evaluator.js';
 import { APPEAL_PATHWAYS, getAllRules } from '../src/rules/legal-rules.js';
+import { SMCAnalyzer, SMC_LEVELS } from '../src/rules/smc-rules.js';
+import { ColvinAnalyzer } from '../src/rules/colvin-analyzer.js';
+import { ProfessionalFormatter } from '../src/output/professional-formatter.js';
+import { DENIAL_REASONS } from '../src/models/case-schema.js';
 
 // ASCII banner
 const BANNER = `
-╔═══════════════════════════════════════════════════════════════╗
-║           VA CLAIMS EXPERT SYSTEM v1.0.0                      ║
-║      Analyze Claims • Identify Errors • Recommend Appeals     ║
-╚═══════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════╗
+║                    VA CLAIMS DECISION-SUPPORT SYSTEM                   ║
+║                              Version 1.1.0                             ║
+║        Analyze Claims • Identify Errors • Recommend Pathways           ║
+╚═══════════════════════════════════════════════════════════════════════╝
 `;
 
 /**
  * Display formatted section header
  */
 function sectionHeader(title) {
-  console.log('\n' + chalk.cyan('─'.repeat(60)));
+  console.log('\n' + chalk.cyan('─'.repeat(70)));
   console.log(chalk.cyan.bold(`  ${title}`));
-  console.log(chalk.cyan('─'.repeat(60)));
+  console.log(chalk.cyan('─'.repeat(70)));
 }
 
 /**
- * Interactive questionnaire for case analysis
+ * Display formatted subsection
  */
-async function runQuestionnaire() {
+function subSection(title) {
+  console.log('\n' + chalk.white.bold(`  ${title}`));
+  console.log(chalk.gray('  ' + '─'.repeat(40)));
+}
+
+/**
+ * Interactive questionnaire for comprehensive case analysis
+ */
+async function runFullAnalysis() {
   console.log(chalk.yellow(BANNER));
 
   sectionHeader('CASE INFORMATION');
@@ -55,7 +70,9 @@ async function runQuestionnaire() {
         { name: 'Initial claim (first time claiming this condition)', value: 'initial' },
         { name: 'Claim for increase (condition has worsened)', value: 'increase' },
         { name: 'Secondary claim (caused by service-connected condition)', value: 'secondary' },
-        { name: 'Reopened claim (previously denied, filing again)', value: 'reopened' }
+        { name: 'Reopened claim (previously denied, filing again)', value: 'reopened' },
+        { name: 'TDIU (Total Disability Individual Unemployability)', value: 'tdiu' },
+        { name: 'SMC (Special Monthly Compensation)', value: 'smc' }
       ]
     },
     {
@@ -63,10 +80,27 @@ async function runQuestionnaire() {
       name: 'decisionDate',
       message: 'Date of VA decision (YYYY-MM-DD):',
       validate: input => {
-        if (!input) return true; // Optional
+        if (!input) return true;
         const date = new Date(input);
-        return !isNaN(date.getTime()) || 'Please enter a valid date';
+        return !isNaN(date.getTime()) || 'Please enter a valid date (YYYY-MM-DD)';
       }
+    },
+    {
+      type: 'list',
+      name: 'denialReason',
+      message: 'Primary reason for denial (if known):',
+      choices: [
+        { name: 'No current disability found', value: 'NO_CURRENT_DISABILITY' },
+        { name: 'No in-service event documented', value: 'NO_IN_SERVICE_EVENT' },
+        { name: 'No medical nexus opinion', value: 'NO_NEXUS' },
+        { name: 'Negative nexus opinion from examiner', value: 'NEGATIVE_NEXUS_OPINION' },
+        { name: 'C&P exam not provided', value: 'NO_EXAM_PROVIDED' },
+        { name: 'C&P exam was inadequate', value: 'INADEQUATE_EXAM' },
+        { name: 'Rating percentage too low', value: 'RATING_TOO_LOW' },
+        { name: 'Effective date issue', value: 'EFFECTIVE_DATE_ERROR' },
+        { name: 'Secondary connection not established', value: 'SECONDARY_NOT_ESTABLISHED' },
+        { name: 'Other / Not sure', value: 'OTHER' }
+      ]
     }
   ]);
 
@@ -82,9 +116,21 @@ async function runQuestionnaire() {
     {
       type: 'confirm',
       name: 'examAdequate',
-      message: 'Was the examination adequate (examiner provided rationale, reviewed records)?',
+      message: 'Was the examination adequate? (examiner provided rationale, reviewed records)',
       when: answers => answers.examProvided,
       default: true
+    },
+    {
+      type: 'list',
+      name: 'examinerOpinion',
+      message: "What was the examiner's opinion on nexus/connection?",
+      when: answers => answers.examProvided,
+      choices: [
+        { name: 'Positive - at least as likely as not', value: 'positive' },
+        { name: 'Negative - less likely than not', value: 'negative' },
+        { name: 'Equivocal - unclear or speculative', value: 'equivocal' },
+        { name: 'No opinion provided', value: 'none' }
+      ]
     }
   ]);
 
@@ -94,7 +140,20 @@ async function runQuestionnaire() {
     {
       type: 'confirm',
       name: 'hasNexusOpinion',
-      message: 'Do you have a medical opinion linking your condition to service?',
+      message: 'Do you have ANY positive medical nexus opinion (from C&P, IMO, or treating doctor)?',
+      default: false
+    },
+    {
+      type: 'confirm',
+      name: 'hasIMO',
+      message: 'Have you submitted an Independent Medical Opinion (IMO)?',
+      default: false
+    },
+    {
+      type: 'confirm',
+      name: 'imoRejected',
+      message: 'Was your IMO rejected or given little weight?',
+      when: answers => answers.hasIMO,
       default: false
     },
     {
@@ -111,8 +170,14 @@ async function runQuestionnaire() {
     },
     {
       type: 'confirm',
+      name: 'hasBuddyStatements',
+      message: 'Have you submitted buddy statements from fellow service members?',
+      default: false
+    },
+    {
+      type: 'confirm',
       name: 'hasNewEvidence',
-      message: 'Do you have NEW evidence that wasn\'t in the original claim?',
+      message: "Do you have NEW evidence that wasn't in the original claim?",
       default: false
     },
     {
@@ -146,15 +211,32 @@ async function runQuestionnaire() {
     },
     {
       type: 'confirm',
-      name: 'benefitOfDoubtApplied',
-      message: 'Do you believe the evidence was roughly equal but VA denied anyway?',
+      name: 'benefitOfDoubtNotApplied',
+      message: 'Do you believe evidence was roughly equal but VA denied anyway?',
       default: false
     },
     {
       type: 'confirm',
-      name: 'credibilityAtIssue',
-      message: 'Is your credibility/testimony a key issue in this case?',
+      name: 'vaRejectedMedicalOpinion',
+      message: 'Did VA reject a favorable medical opinion without citing contrary medical evidence?',
       default: false
+    }
+  ]);
+
+  sectionHeader('COLVIN VIOLATION CHECK');
+
+  const colvinInfo = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'raterMadeMedicalConclusion',
+      message: 'Did the decision make medical conclusions without citing medical evidence?',
+      default: false
+    },
+    {
+      type: 'input',
+      name: 'decisionText',
+      message: 'Paste any concerning language from the decision (optional):',
+      default: ''
     }
   ]);
 
@@ -175,7 +257,7 @@ async function runQuestionnaire() {
     {
       type: 'list',
       name: 'evidence_strength',
-      message: 'How strong do you think your current evidence is?',
+      message: 'How strong is your current evidence?',
       choices: [
         { name: 'Strong - clear medical support and documentation', value: 'strong' },
         { name: 'Moderate - some supporting evidence', value: 'moderate' },
@@ -219,12 +301,34 @@ async function runQuestionnaire() {
   // Combine all answers
   const caseData = {
     condition: basicInfo.condition,
+    claimType: basicInfo.claimType,
     facts: {
-      ...basicInfo,
-      ...examInfo,
-      ...evidenceInfo,
-      ...decisionInfo
+      decisionDate: basicInfo.decisionDate,
+      denialReason: basicInfo.denialReason,
+      examProvided: examInfo.examProvided,
+      examAdequate: examInfo.examAdequate,
+      examinerOpinion: examInfo.examinerOpinion,
+      hasNexusOpinion: evidenceInfo.hasNexusOpinion,
+      hasIMO: evidenceInfo.hasIMO,
+      imoRejected: evidenceInfo.imoRejected,
+      vaRecordsObtained: evidenceInfo.vaRecordsObtained,
+      strsComplete: evidenceInfo.strsComplete,
+      hasBuddyStatements: evidenceInfo.hasBuddyStatements,
+      hasNewEvidence: evidenceInfo.hasNewEvidence,
+      canObtainNewEvidence: evidenceInfo.canObtainNewEvidence,
+      currentDisabilityConceded: decisionInfo.currentDisabilityConceded,
+      inServiceEventConceded: decisionInfo.inServiceEventConceded,
+      layEvidenceConsidered: decisionInfo.layEvidenceConsidered,
+      benefitOfDoubtApplied: !decisionInfo.benefitOfDoubtNotApplied,
+      // Colvin indicators
+      hasFavorableMedicalOpinion: evidenceInfo.hasNexusOpinion,
+      claimDenied: true,
+      hasContraryMedicalOpinion: examInfo.examinerOpinion === 'negative',
+      imoSubmitted: evidenceInfo.hasIMO,
+      vaRejectedMedicalOpinion: decisionInfo.vaRejectedMedicalOpinion,
+      raterMadeMedicalConclusion: colvinInfo.raterMadeMedicalConclusion
     },
+    decisionText: colvinInfo.decisionText,
     strategicFactors: strategicInfo
   };
 
@@ -232,66 +336,111 @@ async function runQuestionnaire() {
 }
 
 /**
- * Display recommendation results
+ * Run Colvin violation analysis
  */
-function displayRecommendation(recommendation) {
+function runColvinAnalysis(caseData) {
+  const analyzer = new ColvinAnalyzer();
+
+  // Prepare data for Colvin analysis
+  const colvinData = {
+    hasFavorableMedicalOpinion: caseData.facts.hasNexusOpinion || caseData.facts.hasIMO,
+    claimDenied: true,
+    hasContraryMedicalOpinion: caseData.facts.examinerOpinion === 'negative',
+    imoSubmitted: caseData.facts.hasIMO,
+    imoRejected: caseData.facts.imoRejected,
+    cpExamPositive: caseData.facts.examinerOpinion === 'positive',
+    vaRejectedMedicalOpinion: caseData.facts.vaRejectedMedicalOpinion,
+    decisionText: caseData.decisionText,
+    denialReasons: [caseData.facts.denialReason]
+  };
+
+  const analysis = analyzer.analyze(colvinData);
+
+  return analysis;
+}
+
+/**
+ * Display comprehensive recommendation results
+ */
+function displayRecommendation(recommendation, colvinAnalysis, caseData) {
   console.log('\n');
   sectionHeader('ANALYSIS RESULTS');
 
   // Primary recommendation
   if (recommendation.primaryPathway) {
     const primary = recommendation.primaryPathway;
-    console.log('\n' + chalk.green.bold('✓ RECOMMENDED PATHWAY:'));
+    console.log('\n' + chalk.green.bold('RECOMMENDED PATHWAY:'));
     console.log(chalk.white.bold(`  ${primary.pathway.name}`));
     console.log(chalk.gray(`  ${primary.pathway.description}`));
     console.log(chalk.yellow(`  Confidence: ${(recommendation.confidence * 100).toFixed(0)}%`));
     console.log(chalk.cyan(`  Avg. Processing Time: ${primary.pathway.averageProcessingDays} days`));
 
     // Pathway features
-    console.log('\n' + chalk.white('  Features:'));
-    console.log(`    • New evidence allowed: ${primary.pathway.allowsNewEvidence ? chalk.green('Yes') : chalk.red('No')}`);
-    console.log(`    • Hearing available: ${primary.pathway.allowsHearing ? chalk.green('Yes') : chalk.red('No')}`);
+    subSection('Pathway Features');
+    console.log(`  New evidence allowed: ${primary.pathway.allowsNewEvidence ? chalk.green('Yes') : chalk.red('No')}`);
+    console.log(`  Hearing available: ${primary.pathway.allowsHearing ? chalk.green('Yes') : chalk.red('No')}`);
     if (primary.pathway.timeLimit) {
-      console.log(`    • Time limit: ${primary.pathway.timeLimit} days from decision`);
+      console.log(`  Time limit: ${primary.pathway.timeLimit} days from decision`);
+    } else {
+      console.log(`  Time limit: ${chalk.green('None')} (but file within 1 year to preserve effective date)`);
+    }
+  }
+
+  // Colvin Violation Analysis
+  if (colvinAnalysis && colvinAnalysis.hasViolation) {
+    subSection('COLVIN VIOLATION DETECTED');
+    console.log(chalk.red.bold(`  Type: ${colvinAnalysis.violationType.name}`));
+    console.log(chalk.white(`  ${colvinAnalysis.violationType.description}`));
+    console.log(chalk.cyan(`  Citation: ${colvinAnalysis.violationType.citation}`));
+    console.log(chalk.yellow(`  Confidence: ${(colvinAnalysis.confidence * 100).toFixed(0)}%`));
+    console.log(chalk.green(`  Remedy: ${colvinAnalysis.violationType.remedy}`));
+
+    if (colvinAnalysis.phraseMatches.length > 0) {
+      console.log(chalk.white('\n  Concerning Language Found:'));
+      for (const match of colvinAnalysis.phraseMatches.slice(0, 3)) {
+        console.log(chalk.gray(`    "${match.phrase}"`));
+        console.log(chalk.gray(`    - ${match.explanation}`));
+      }
     }
   }
 
   // Legal triggers
   const triggers = recommendation.primaryPathway?.triggers || [];
   if (triggers.length > 0) {
-    console.log('\n' + chalk.white.bold('  Legal Basis:'));
+    subSection('Legal Issues Identified');
     for (const trigger of triggers.slice(0, 5)) {
-      console.log(chalk.white(`    • ${trigger.citation || trigger.ruleName}`));
-      console.log(chalk.gray(`      ${trigger.reasoning}`));
+      console.log(chalk.cyan(`  ${trigger.citation || trigger.ruleName}`));
+      console.log(chalk.gray(`    ${trigger.reasoning}`));
     }
   }
 
   // Alternative pathways
   if (recommendation.alternativePathways.length > 0) {
-    console.log('\n' + chalk.yellow.bold('  Alternative Pathways:'));
+    subSection('Alternative Pathways');
     for (const alt of recommendation.alternativePathways.slice(0, 2)) {
       const scorePercent = recommendation.primaryPathway
         ? ((alt.adjustedScore / recommendation.primaryPathway.adjustedScore) * 100).toFixed(0)
         : '0';
-      console.log(chalk.white(`    • ${alt.pathway.name} (${scorePercent}% relative score)`));
+      console.log(chalk.white(`  ${alt.pathway.name} (${scorePercent}% relative strength)`));
+      console.log(chalk.gray(`    ${alt.pathway.description}`));
     }
   }
 
   // Warnings
   if (recommendation.warnings.length > 0) {
-    console.log('\n' + chalk.red.bold('⚠ WARNINGS:'));
+    subSection('WARNINGS');
     for (const warning of recommendation.warnings) {
-      const icon = warning.severity === 'high' ? '🔴' : warning.severity === 'medium' ? '🟡' : '🔵';
+      const icon = warning.severity === 'high' ? chalk.red('!') : warning.severity === 'medium' ? chalk.yellow('!') : chalk.blue('i');
       console.log(`  ${icon} ${chalk.white(warning.message)}`);
     }
   }
 
   // Action items
   if (recommendation.actionItems.length > 0) {
-    console.log('\n' + chalk.cyan.bold('📋 ACTION ITEMS:'));
+    subSection('ACTION ITEMS');
     for (const item of recommendation.actionItems) {
       const priorityColor = item.priority === 'high' ? chalk.red : item.priority === 'medium' ? chalk.yellow : chalk.gray;
-      console.log(`  ${priorityColor('['+ item.priority.toUpperCase() + ']')} ${item.action}`);
+      console.log(`  ${priorityColor('[' + item.priority.toUpperCase() + ']')} ${item.action}`);
       if (item.deadline) {
         console.log(chalk.gray(`      Deadline: ${item.deadline}`));
       }
@@ -299,9 +448,27 @@ function displayRecommendation(recommendation) {
   }
 
   // Full reasoning
-  console.log('\n');
-  sectionHeader('DETAILED ANALYSIS');
+  sectionHeader('DETAILED LEGAL ANALYSIS');
   console.log(recommendation.reasoning);
+
+  // Legal citations
+  sectionHeader('APPLICABLE LEGAL AUTHORITIES');
+  const citations = new Set();
+  for (const trigger of triggers) {
+    if (trigger.citation) citations.add(trigger.citation);
+  }
+  if (colvinAnalysis?.hasViolation) {
+    citations.add(colvinAnalysis.violationType.citation);
+    for (const caseRef of colvinAnalysis.supportingCaseLaw || []) {
+      citations.add(caseRef.citation);
+    }
+  }
+  citations.add('38 C.F.R. § 3.159 - Duty to Assist');
+  citations.add('38 C.F.R. § 3.303 - Service Connection');
+
+  for (const citation of citations) {
+    console.log(chalk.cyan(`  ${citation}`));
+  }
 }
 
 /**
@@ -349,13 +516,54 @@ function displayPathways() {
   for (const [id, pathway] of Object.entries(APPEAL_PATHWAYS)) {
     console.log(`\n${chalk.cyan.bold(pathway.name)} (${id})`);
     console.log(chalk.gray(`  ${pathway.description}`));
-    console.log(`  • Time limit: ${pathway.timeLimit ? pathway.timeLimit + ' days' : 'None'}`);
-    console.log(`  • New evidence: ${pathway.allowsNewEvidence ? chalk.green('Allowed') : chalk.red('Not allowed')}`);
-    console.log(`  • Hearing: ${pathway.allowsHearing ? chalk.green('Available') : chalk.red('Not available')}`);
-    console.log(`  • Avg. processing: ${chalk.yellow(pathway.averageProcessingDays + ' days')}`);
+    console.log(`  Time limit: ${pathway.timeLimit ? pathway.timeLimit + ' days' : chalk.green('None')}`);
+    console.log(`  New evidence: ${pathway.allowsNewEvidence ? chalk.green('Allowed') : chalk.red('Not allowed')}`);
+    console.log(`  Hearing: ${pathway.allowsHearing ? chalk.green('Available') : chalk.red('Not available')}`);
+    console.log(`  Avg. processing: ${chalk.yellow(pathway.averageProcessingDays + ' days')}`);
     console.log(chalk.white('  Best for:'));
     for (const use of pathway.bestFor) {
       console.log(chalk.gray(`    - ${use}`));
+    }
+  }
+}
+
+/**
+ * Display SMC levels
+ */
+function displaySMC() {
+  console.log(chalk.yellow(BANNER));
+  sectionHeader('SPECIAL MONTHLY COMPENSATION (SMC) LEVELS');
+
+  for (const [id, level] of Object.entries(SMC_LEVELS)) {
+    console.log(`\n${chalk.cyan.bold(level.name)}`);
+    console.log(chalk.gray(`  ${level.description}`));
+    console.log(chalk.white(`  Statute: ${level.statute}`));
+    console.log(chalk.white(`  Regulation: ${level.cfr}`));
+
+    if (level.requirements?.criteria) {
+      console.log(chalk.white('  Requirements:'));
+      for (const req of level.requirements.criteria.slice(0, 4)) {
+        console.log(chalk.gray(`    - ${req}`));
+      }
+    }
+  }
+}
+
+/**
+ * Display denial reasons with counter-strategies
+ */
+function displayDenialReasons() {
+  console.log(chalk.yellow(BANNER));
+  sectionHeader('DENIAL REASONS & COUNTER-STRATEGIES');
+
+  for (const [id, reason] of Object.entries(DENIAL_REASONS)) {
+    console.log(`\n${chalk.cyan.bold(reason.description)}`);
+    console.log(chalk.gray(`  Legal Basis: ${reason.legalBasis}`));
+    console.log(chalk.white(`  Citation: ${reason.citation}`));
+    console.log(chalk.green(`  Recommended Pathway: ${reason.recommendedPathway}`));
+    console.log(chalk.white('  Counter-Strategies:'));
+    for (const strategy of reason.counterStrategies) {
+      console.log(chalk.yellow(`    - ${strategy}`));
     }
   }
 }
@@ -381,6 +589,7 @@ async function quickAnalysis() {
         { name: 'No C&P exam was provided', value: 'no_exam' },
         { name: 'C&P exam was inadequate', value: 'bad_exam' },
         { name: 'Missing nexus/medical connection', value: 'no_nexus' },
+        { name: 'VA rejected my medical opinion without contrary evidence', value: 'colvin' },
         { name: 'VA ignored my evidence', value: 'ignored_evidence' },
         { name: 'VA made wrong legal determination', value: 'legal_error' },
         { name: 'Rating percentage is too low', value: 'rating_low' },
@@ -397,39 +606,77 @@ async function quickAnalysis() {
 
   // Map to quick recommendation
   const quickMap = {
-    'no_exam': 'HLR',
-    'bad_exam': 'SUPPLEMENTAL',
-    'no_nexus': 'SUPPLEMENTAL',
-    'ignored_evidence': 'HLR',
-    'legal_error': 'BOARD_DIRECT',
-    'rating_low': answers.hasNewEvidence ? 'SUPPLEMENTAL' : 'HLR',
-    'unknown': 'SUPPLEMENTAL'
+    'no_exam': { pathway: 'HLR', reason: 'Duty to assist violation - clear procedural error' },
+    'bad_exam': { pathway: 'SUPPLEMENTAL', reason: 'Submit new adequate medical evidence' },
+    'no_nexus': { pathway: 'SUPPLEMENTAL', reason: 'New nexus opinion is new and relevant evidence' },
+    'colvin': { pathway: 'HLR', reason: 'Colvin violation - VA cannot reject medical evidence without contrary medical evidence' },
+    'ignored_evidence': { pathway: 'HLR', reason: 'Procedural error in weighing evidence' },
+    'legal_error': { pathway: 'BOARD_DIRECT', reason: 'Legal interpretation best addressed by Board' },
+    'rating_low': { pathway: answers.hasNewEvidence ? 'SUPPLEMENTAL' : 'HLR', reason: answers.hasNewEvidence ? 'New DBQ documenting severity' : 'Challenge rating criteria application' },
+    'unknown': { pathway: 'SUPPLEMENTAL', reason: 'New evidence provides fresh review opportunity' }
   };
 
-  const pathwayId = quickMap[answers.mainIssue];
-  const pathway = APPEAL_PATHWAYS[pathwayId];
+  const rec = quickMap[answers.mainIssue];
+  const pathway = APPEAL_PATHWAYS[rec.pathway];
 
   console.log('\n' + chalk.green.bold('QUICK RECOMMENDATION:'));
   console.log(chalk.white.bold(`  ${pathway.name}`));
-  console.log(chalk.gray(`  ${pathway.description}\n`));
-  console.log(chalk.yellow('For detailed analysis, run: va-claims analyze'));
+  console.log(chalk.gray(`  ${pathway.description}`));
+  console.log(chalk.cyan(`\n  Reasoning: ${rec.reason}`));
+
+  if (answers.mainIssue === 'colvin') {
+    console.log(chalk.yellow('\n  Key Citation: Colvin v. Derwinski, 1 Vet. App. 171 (1991)'));
+    console.log(chalk.white('  "VA cannot substitute its own unsubstantiated medical'));
+    console.log(chalk.white('   conclusions for that of a medical professional."'));
+  }
+
+  console.log(chalk.gray('\n  For detailed analysis, run: va-claims analyze'));
+}
+
+/**
+ * Export professional report
+ */
+async function exportReport(format = 'text') {
+  console.log(chalk.yellow(BANNER));
+  console.log(chalk.cyan('Running full analysis for professional report...\n'));
+
+  try {
+    const caseData = await runFullAnalysis();
+    const recommender = new PathwayRecommender();
+    const recommendation = recommender.recommend(caseData);
+
+    const formatter = new ProfessionalFormatter({ outputFormat: format });
+    const document = formatter.formatRecommendation(recommendation, caseData);
+    const output = formatter.render(document);
+
+    sectionHeader('PROFESSIONAL REPORT');
+    console.log(output);
+
+  } catch (error) {
+    if (error.name === 'ExitPromptError') {
+      console.log('\nReport generation cancelled.');
+    } else {
+      throw error;
+    }
+  }
 }
 
 // Set up CLI commands
 program
   .name('va-claims')
-  .description('VA Claims Expert System - Analyze claims and recommend appeal pathways')
-  .version('1.0.0');
+  .description('VA Claims Decision-Support System - Analyze claims and recommend appeal pathways')
+  .version('1.1.0');
 
 program
   .command('analyze')
-  .description('Run full interactive analysis')
+  .description('Run full interactive analysis with Colvin violation detection')
   .action(async () => {
     try {
-      const caseData = await runQuestionnaire();
+      const caseData = await runFullAnalysis();
       const recommender = new PathwayRecommender();
       const recommendation = recommender.recommend(caseData);
-      displayRecommendation(recommendation);
+      const colvinAnalysis = runColvinAnalysis(caseData);
+      displayRecommendation(recommendation, colvinAnalysis, caseData);
     } catch (error) {
       if (error.name === 'ExitPromptError') {
         console.log('\nAnalysis cancelled.');
@@ -445,14 +692,30 @@ program
   .action(quickAnalysis);
 
 program
+  .command('report')
+  .description('Generate professional report')
+  .option('-f, --format <format>', 'Output format (text, markdown)', 'text')
+  .action((options) => exportReport(options.format));
+
+program
   .command('rules')
   .description('Display all legal rules in the database')
   .action(displayRules);
 
 program
   .command('pathways')
-  .description('Display all appeal pathways')
+  .description('Display all appeal pathways under AMA')
   .action(displayPathways);
+
+program
+  .command('smc')
+  .description('Display Special Monthly Compensation (SMC) levels')
+  .action(displaySMC);
+
+program
+  .command('denials')
+  .description('Display denial reasons with counter-strategies')
+  .action(displayDenialReasons);
 
 program
   .command('deadline')
@@ -472,17 +735,90 @@ program
       console.log(`\n${chalk.cyan(pathway.name)}:`);
 
       if (info.expired) {
-        console.log(chalk.red(`  ⛔ DEADLINE PASSED`));
+        console.log(chalk.red(`  DEADLINE PASSED`));
       } else if (info.urgent) {
-        console.log(chalk.yellow(`  ⚠️ URGENT: ${info.daysRemaining} days remaining`));
+        console.log(chalk.yellow(`  URGENT: ${info.daysRemaining} days remaining`));
         console.log(chalk.gray(`    Deadline: ${info.deadline}`));
       } else if (info.deadline) {
-        console.log(chalk.green(`  ✓ ${info.daysRemaining} days remaining`));
+        console.log(chalk.green(`  ${info.daysRemaining} days remaining`));
         console.log(chalk.gray(`    Deadline: ${info.deadline}`));
       } else {
         console.log(chalk.gray(`  No time limit`));
         if (info.note) {
           console.log(chalk.gray(`    Note: ${info.note}`));
+        }
+      }
+    }
+  });
+
+program
+  .command('colvin')
+  .description('Check for Colvin violation indicators')
+  .action(async () => {
+    console.log(chalk.yellow(BANNER));
+    sectionHeader('COLVIN VIOLATION CHECKER');
+
+    const answers = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'favorableOpinion',
+        message: 'Did you submit a favorable medical opinion?',
+        default: false
+      },
+      {
+        type: 'confirm',
+        name: 'opinionRejected',
+        message: 'Was the opinion rejected or given little weight?',
+        when: a => a.favorableOpinion,
+        default: false
+      },
+      {
+        type: 'confirm',
+        name: 'contraryOpinion',
+        message: 'Did VA cite a contrary medical opinion to reject yours?',
+        when: a => a.opinionRejected,
+        default: false
+      },
+      {
+        type: 'input',
+        name: 'decisionText',
+        message: 'Paste any concerning decision language (optional):',
+        default: ''
+      }
+    ]);
+
+    const analyzer = new ColvinAnalyzer();
+    const quickResult = analyzer.quickCheck({
+      hasFavorableMedicalOpinion: answers.favorableOpinion,
+      claimDenied: true,
+      hasContraryMedicalOpinion: answers.contraryOpinion,
+      imoSubmitted: answers.favorableOpinion,
+      imoRejected: answers.opinionRejected
+    });
+
+    console.log('\n');
+    if (quickResult.likelyViolation) {
+      console.log(chalk.red.bold('POTENTIAL COLVIN VIOLATION DETECTED'));
+      console.log(chalk.yellow(`Confidence: ${(quickResult.confidence * 100).toFixed(0)}%`));
+
+      for (const flag of quickResult.redFlags) {
+        console.log(chalk.white(`\n  Issue: ${flag.flag}`));
+        console.log(chalk.cyan(`  Action: ${flag.action}`));
+      }
+
+      console.log(chalk.white('\n  Key Citation: Colvin v. Derwinski, 1 Vet. App. 171 (1991)'));
+    } else {
+      console.log(chalk.green('No obvious Colvin indicators found.'));
+      console.log(chalk.gray('Run full analysis for comprehensive review.'));
+    }
+
+    if (answers.decisionText) {
+      const textAnalysis = analyzer.analyze({ decisionText: answers.decisionText });
+      if (textAnalysis.phraseMatches.length > 0) {
+        console.log(chalk.yellow('\n  Concerning phrases found in decision text:'));
+        for (const match of textAnalysis.phraseMatches.slice(0, 5)) {
+          console.log(chalk.white(`    "${match.phrase}"`));
+          console.log(chalk.gray(`    - ${match.explanation}`));
         }
       }
     }
