@@ -1,0 +1,28 @@
+# FastAPI and server
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+
+# PDF Processing
+PyMuPDF==1.24.13
+pdf2image==1.17.0
+pytesseract==0.3.13
+Pillow==11.0.0
+
+# AI Integration
+anthropic==0.39.0
+
+# Data validation
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# Async support
+aiofiles==24.1.0
+aiohttp==3.10.10
+
+# Redis for job queue integration
+redis==5.2.0
+
+# Utilities
+python-dateutil==2.9.0
+python-dotenv==1.0.1

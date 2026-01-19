@@ -1,0 +1,331 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// User & Authentication
+// ============================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  name          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  cases         Case[]
+  sessions      Session[]
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================
+// Case Management
+// ============================================
+
+enum CaseStatus {
+  CREATED
+  UPLOADING
+  PROCESSING
+  REVIEW
+  COMPLETE
+  ERROR
+}
+
+model Case {
+  id                 String     @id @default(uuid())
+  userId             String
+  internalIdentifier String     // User's internal case reference, NOT veteran PII
+  status             CaseStatus @default(CREATED)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  claimedConditions  ClaimedCondition[]
+  documents          Document[]
+  outputDocuments    OutputDocument[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ============================================
+// Claimed Conditions
+// ============================================
+
+enum ServiceConnectionTheory {
+  DIRECT
+  SECONDARY
+  AGGRAVATION
+  PRESUMPTIVE_AGENT_ORANGE
+  PRESUMPTIVE_BURN_PIT
+  PRESUMPTIVE_GULF_WAR
+  PRESUMPTIVE_RADIATION
+}
+
+enum ClaimedConditionStatus {
+  PENDING
+  EXTRACTING
+  REVIEW
+  COMPLETE
+}
+
+model ClaimedCondition {
+  id                      String                   @id @default(uuid())
+  caseId                  String
+  conditionName           String
+  serviceConnectionTheory ServiceConnectionTheory
+  primaryConditionId      String?                  // Self-reference for secondary connections
+  status                  ClaimedConditionStatus   @default(PENDING)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+
+  case                    Case                     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  primaryCondition        ClaimedCondition?        @relation("SecondaryConditions", fields: [primaryConditionId], references: [id])
+  secondaryConditions     ClaimedCondition[]       @relation("SecondaryConditions")
+  extractions             Extraction[]
+  evidenceSyntheses       EvidenceSynthesis[]
+
+  @@index([caseId])
+  @@index([primaryConditionId])
+}
+
+// ============================================
+// Documents
+// ============================================
+
+enum DocumentType {
+  SERVICE_TREATMENT_RECORD
+  DD214
+  SERVICE_PERSONNEL_RECORD
+  CP_EXAM
+  VA_TREATMENT_RECORD
+  PRIVATE_MEDICAL_RECORD
+  DBQ
+  INDEPENDENT_MEDICAL_OPINION
+  RATING_DECISION
+  NOTICE_OF_DISAGREEMENT
+  BOARD_DECISION
+  CORRESPONDENCE
+  LAY_STATEMENT
+  OTHER
+  UNCLASSIFIED
+}
+
+enum ProcessingStatus {
+  PENDING
+  CLASSIFIED
+  EXTRACTED
+  ERROR
+}
+
+model Document {
+  id               String           @id @default(uuid())
+  caseId           String
+  documentType     DocumentType     @default(UNCLASSIFIED)
+  sourceFileName   String
+  pageStart        Int
+  pageEnd          Int
+  documentDate     DateTime?
+  provider         String?
+  ocrConfidence    Float?
+  extractedText    String           @db.Text
+  processingStatus ProcessingStatus @default(PENDING)
+  createdAt        DateTime         @default(now())
+
+  case             Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  extractions      Extraction[]
+
+  @@index([caseId])
+  @@index([documentType])
+  @@index([processingStatus])
+}
+
+// ============================================
+// Extractions
+// ============================================
+
+enum ExtractionType {
+  DIAGNOSIS
+  TREATMENT
+  SYMPTOM
+  NEXUS_STATEMENT
+  EXAM_FINDING
+  IN_SERVICE_EVENT
+  LAY_OBSERVATION
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EDITED
+}
+
+model Extraction {
+  id             String         @id @default(uuid())
+  documentId     String
+  conditionId    String
+  extractionType ExtractionType
+  extractedText  String         @db.Text  // Verbatim quote
+  pageReference  String
+  confidence     Float
+  reviewStatus   ReviewStatus   @default(PENDING)
+  editedText     String?        @db.Text
+  reviewedAt     DateTime?
+  createdAt      DateTime       @default(now())
+
+  document       Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  condition      ClaimedCondition @relation(fields: [conditionId], references: [id], onDelete: Cascade)
+  syntheses      ExtractionOnSynthesis[]
+
+  @@index([documentId])
+  @@index([conditionId])
+  @@index([reviewStatus])
+}
+
+// ============================================
+// Evidence Synthesis
+// ============================================
+
+enum LegalElement {
+  CURRENT_DIAGNOSIS
+  IN_SERVICE_EVENT
+  NEXUS
+  QUALIFYING_SERVICE
+  PRESUMPTIVE_DIAGNOSIS
+  MANIFESTATION_TIMEFRAME
+  PRIMARY_CONDITION_SC
+  SECONDARY_NEXUS
+}
+
+enum EvidenceStrength {
+  STRONG
+  MODERATE
+  WEAK
+  GAP
+}
+
+model EvidenceSynthesis {
+  id             String          @id @default(uuid())
+  conditionId    String
+  legalElement   LegalElement
+  evidenceStrength EvidenceStrength
+  synthesisText  String          @db.Text
+  gaps           String?         @db.Text
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  condition      ClaimedCondition @relation(fields: [conditionId], references: [id], onDelete: Cascade)
+  supportingExtractions ExtractionOnSynthesis[]
+
+  @@index([conditionId])
+  @@index([legalElement])
+}
+
+// Junction table for many-to-many relationship between Extraction and EvidenceSynthesis
+model ExtractionOnSynthesis {
+  extractionId String
+  synthesisId  String
+
+  extraction   Extraction       @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+  synthesis    EvidenceSynthesis @relation(fields: [synthesisId], references: [id], onDelete: Cascade)
+
+  @@id([extractionId, synthesisId])
+  @@index([synthesisId])
+}
+
+// ============================================
+// Output Documents
+// ============================================
+
+enum OutputType {
+  EVIDENCE_COMPILATION
+  ARGUMENT_FRAMEWORK
+  DRAFT_4138
+  DRAFT_BVA_BRIEF
+}
+
+model OutputDocument {
+  id          String     @id @default(uuid())
+  caseId      String
+  outputType  OutputType
+  content     Json       // Flexible JSON content for different output types
+  generatedAt DateTime   @default(now())
+
+  case        Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([outputType])
+}
+
+// ============================================
+// Job Queue (for tracking background jobs)
+// ============================================
+
+enum JobType {
+  PDF_SPLIT
+  DOCUMENT_CLASSIFY
+  EXTRACT_EVIDENCE
+  SYNTHESIZE_EVIDENCE
+  GENERATE_OUTPUT
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  caseId      String
+  jobType     JobType
+  status      JobStatus @default(PENDING)
+  payload     Json?     // Job-specific data
+  result      Json?     // Job result data
+  error       String?   @db.Text
+  attempts    Int       @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([caseId])
+  @@index([jobType])
+  @@index([status])
+}
+
+// ============================================
+// Upload tracking
+// ============================================
+
+model Upload {
+  id           String   @id @default(uuid())
+  caseId       String
+  fileName     String
+  fileSize     Int
+  mimeType     String
+  storagePath  String   // Path to file in storage
+  totalPages   Int?
+  uploadedAt   DateTime @default(now())
+
+  @@index([caseId])
+}
